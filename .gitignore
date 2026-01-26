@@ -42,3 +42,7 @@ coverage/
 
 # PM2
 .pm2/
+
+# ML Models (too large for GitHub - download separately)
+models/
+*.onnx
