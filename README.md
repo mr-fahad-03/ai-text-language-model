@@ -30,36 +30,22 @@ git clone https://github.com/mr-fahad-03/ai-text-language-model.git
 cd ai-text-language-model
 ```
 
-### 2. Install Dependencies
+### 2. Install & Download Models (One Command!)
 
 ```bash
 npm install
 ```
 
-### 3. Download Models
+This will automatically:
+- Install all dependencies
+- Download all translation models (~1GB)
 
-The translation models (~1.1GB) are not included in this repository. Download them:
+> ⏱️ First install takes 5-10 minutes depending on your internet speed.
 
-**Option A: Using Hugging Face CLI**
-```bash
-# Install huggingface-hub if not installed
-pip install huggingface-hub
-
-# Download models
-huggingface-cli download Xenova/nllb-200-distilled-600M --local-dir models/Xenova/nllb-200-distilled-600M
-huggingface-cli download Xenova/opus-mt-ar-en --local-dir models/Xenova/opus-mt-ar-en
-huggingface-cli download Xenova/opus-mt-en-ar --local-dir models/Xenova/opus-mt-en-ar
-```
-
-**Option B: Manual Download from Hugging Face**
-- [Xenova/nllb-200-distilled-600M](https://huggingface.co/Xenova/nllb-200-distilled-600M)
-- [Xenova/opus-mt-ar-en](https://huggingface.co/Xenova/opus-mt-ar-en)
-- [Xenova/opus-mt-en-ar](https://huggingface.co/Xenova/opus-mt-en-ar)
-
-### 4. Start the Server
+### 3. Start the Server
 
 ```bash
-# Development
+# Development (with auto-reload)
 npm run dev
 
 # Production
