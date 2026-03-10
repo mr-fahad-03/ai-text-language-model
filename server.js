@@ -32,6 +32,7 @@ const LANG_CODES = {
 const translationCache = new Map();
 const CACHE_MAX_SIZE = 10000;
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const MODEL_BATCH_SIZE = 12;
 
 // Middleware
 app.use(cors({
@@ -61,6 +62,123 @@ const setCache = (key, translation) => {
     translationCache.delete(firstKey);
   }
   translationCache.set(key, { translation, timestamp: Date.now() });
+};
+
+const getLangPair = (direction = 'en-ar') => (
+  direction === 'en-ar'
+    ? [LANG_CODES.en, LANG_CODES.ar]
+    : [LANG_CODES.ar, LANG_CODES.en]
+);
+
+const chunkArray = (arr, size) => {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+};
+
+const extractTranslationText = (result, fallback) => {
+  if (!result) return fallback;
+  if (typeof result === 'string') return result;
+  if (Array.isArray(result)) {
+    if (result.length === 0) return fallback;
+    const first = result[0];
+    if (typeof first === 'string') return first;
+    if (first && typeof first.translation_text === 'string') return first.translation_text;
+    return fallback;
+  }
+  if (typeof result.translation_text === 'string') return result.translation_text;
+  return fallback;
+};
+
+const runModelTranslation = async (input, direction = 'en-ar') => {
+  if (!translator) return input;
+  const [srcLang, tgtLang] = getLangPair(direction);
+  return translator(input, { src_lang: srcLang, tgt_lang: tgtLang });
+};
+
+const translateSingleText = async (text, direction = 'en-ar') => {
+  if (!text || typeof text !== 'string' || text.trim() === '') {
+    return text;
+  }
+
+  const cacheKey = getCacheKey(text, direction);
+  const cached = getFromCache(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const result = await runModelTranslation(text, direction);
+    const translated = extractTranslationText(result, text);
+    setCache(cacheKey, translated);
+    return translated;
+  } catch (error) {
+    console.error('Single translation error:', error.message);
+    return text;
+  }
+};
+
+const translateBatchTexts = async (texts, direction = 'en-ar') => {
+  if (!Array.isArray(texts) || texts.length === 0) return [];
+
+  const normalizedTexts = texts.map((text) => (typeof text === 'string' ? text : String(text ?? '')));
+  const uniqueTexts = Array.from(new Set(normalizedTexts));
+  const resolvedMap = new Map();
+  const uncachedTexts = [];
+
+  // Resolve from cache first
+  uniqueTexts.forEach((text) => {
+    if (!text || text.trim() === '') {
+      resolvedMap.set(text, text);
+      return;
+    }
+    const cacheKey = getCacheKey(text, direction);
+    const cached = getFromCache(cacheKey);
+    if (cached) {
+      resolvedMap.set(text, cached);
+    } else {
+      uncachedTexts.push(text);
+    }
+  });
+
+  if (uncachedTexts.length > 0) {
+    if (!translator) {
+      console.warn('Model not loaded yet, returning original texts');
+      uncachedTexts.forEach((text) => resolvedMap.set(text, text));
+    } else {
+      const batches = chunkArray(uncachedTexts, MODEL_BATCH_SIZE);
+
+      for (const batch of batches) {
+        try {
+          const result = await runModelTranslation(batch, direction);
+          const outputArray = Array.isArray(result) ? result : [result];
+
+          // If model batch output shape is unexpected, fallback to per-item translation.
+          if (outputArray.length !== batch.length) {
+            console.warn(
+              `Batch output mismatch for ${direction}: expected ${batch.length}, got ${outputArray.length}. Falling back to per-item translation.`
+            );
+            for (const sourceText of batch) {
+              const translated = await translateSingleText(sourceText, direction);
+              resolvedMap.set(sourceText, translated);
+            }
+            continue;
+          }
+
+          batch.forEach((sourceText, index) => {
+            const translated = extractTranslationText(outputArray[index], sourceText);
+            resolvedMap.set(sourceText, translated);
+            setCache(getCacheKey(sourceText, direction), translated);
+          });
+        } catch (error) {
+          console.error('Batch translation error:', error.message);
+          batch.forEach((sourceText) => resolvedMap.set(sourceText, sourceText));
+        }
+      }
+    }
+  }
+
+  return normalizedTexts.map((text) => resolvedMap.get(text) || text);
 };
 
 // Load translation models
@@ -108,32 +226,8 @@ const translateText = async (text, direction = 'en-ar') => {
     return text;
   }
 
-  // Check cache first
-  const cacheKey = getCacheKey(text, direction);
-  const cached = getFromCache(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  if (!translator) {
-    console.warn('Model not loaded yet, returning original text');
-    return text;
-  }
-
   try {
-    // Determine source and target languages for NLLB
-    const [srcLang, tgtLang] = direction === 'en-ar' 
-      ? [LANG_CODES.en, LANG_CODES.ar]
-      : [LANG_CODES.ar, LANG_CODES.en];
-
-    const result = await translator(text, {
-      src_lang: srcLang,
-      tgt_lang: tgtLang,
-    });
-    
-    const translatedText = result[0]?.translation_text || text;
-    setCache(cacheKey, translatedText);
-    return translatedText;
+    return await translateSingleText(text, direction);
   } catch (error) {
     console.error('Translation error:', error.message);
     return text;
@@ -183,9 +277,7 @@ app.post('/api/translate/en-ar', async (req, res) => {
     
     // Batch translation
     if (texts && Array.isArray(texts)) {
-      const translations = await Promise.all(
-        texts.map(t => translateText(t, 'en-ar'))
-      );
+      const translations = await translateBatchTexts(texts, 'en-ar');
       return res.json({ success: true, translations });
     }
     
@@ -217,9 +309,7 @@ app.post('/api/translate/ar-en', async (req, res) => {
     
     // Batch translation
     if (texts && Array.isArray(texts)) {
-      const translations = await Promise.all(
-        texts.map(t => translateText(t, 'ar-en'))
-      );
+      const translations = await translateBatchTexts(texts, 'ar-en');
       return res.json({ success: true, translations });
     }
     
@@ -260,9 +350,7 @@ app.post('/api/translate', async (req, res) => {
     
     // Batch translation
     if (texts && Array.isArray(texts)) {
-      const translations = await Promise.all(
-        texts.map(t => translateText(t, direction))
-      );
+      const translations = await translateBatchTexts(texts, direction);
       return res.json({ success: true, translations, from, to });
     }
     
