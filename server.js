@@ -38,6 +38,28 @@ const STARTUP_PREWARM_ENABLED = String(process.env.STARTUP_PREWARM_ENABLED || "t
 const STARTUP_PREWARM_DELAY_MS = Number(process.env.STARTUP_PREWARM_DELAY_MS || 2500)
 const STARTUP_PREWARM_MAX_TEXTS = Number(process.env.STARTUP_PREWARM_MAX_TEXTS || 1200)
 const PREWARM_SOURCE_API_URL = (process.env.PREWARM_SOURCE_API_URL || "https://api.grabatoz.ae").replace(/\/+$/, "")
+const DYNAMIC_HOT_PHRASES = [
+  "Intel Core i3",
+  "Intel Core i5",
+  "Intel Core i7",
+  "Intel Core Ultra 7",
+  "AMD Ryzen 5",
+  "AMD Ryzen 7",
+  "16GB RAM",
+  "32GB RAM",
+  "512GB SSD",
+  "1TB SSD",
+  "NVIDIA GeForce RTX",
+  "Windows 11",
+  "In Stock",
+  "Out of Stock",
+  "Pre-order",
+  "Brand",
+  "Category",
+  "Warranty",
+  "Product Description",
+  "Specifications",
+]
 
 // LRU-style map: oldest at beginning, newest at end.
 // key -> { translation, timestamp, lastAccess }
@@ -309,6 +331,7 @@ const buildStartupWarmTexts = async () => {
 
   categories.forEach((c) => push(c?.name))
   brands.forEach((b) => push(b?.name))
+  DYNAMIC_HOT_PHRASES.forEach((phrase) => push(phrase))
 
   products.forEach((p) => {
     push(p?.name)
